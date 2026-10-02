@@ -4,6 +4,7 @@ import android.os.BadParcelableException
 import android.os.Bundle
 import android.os.Parcel
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.filters.SdkSuppress
 import io.github.chimio.inxlocker.util.PrefsProvider
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -28,6 +29,7 @@ class ForcedComponentPreferencesTest {
     }
 
     @Test
+    @SdkSuppress(minSdkVersion = 36)
     fun unnormalizedKotlinEmptySetReproducesClassLoaderFailure() {
         val prefs = XposedService(backend).getRemotePreferences("regression")
         prefs.edit().putStringSet(key, emptySet()).commit()
