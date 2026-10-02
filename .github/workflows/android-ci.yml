@@ -7,11 +7,13 @@ on:
     paths:
       - "app/**"
       - ".github/workflows/android-ci.yml"
+      - ".github/check-app-startup.sh"
   pull_request:
     branches: ["**"]
     paths:
       - "app/**"
       - ".github/workflows/android-ci.yml"
+      - ".github/check-app-startup.sh"
   workflow_dispatch:
 
 jobs:
