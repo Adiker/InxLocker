@@ -3,8 +3,16 @@ package io.github.libxposed.service
 import android.os.BadParcelableException
 import android.os.Bundle
 import android.os.Parcel
+import android.content.Intent
+import android.graphics.Rect
+import android.os.SystemClock
+import android.view.InputDevice
+import android.view.MotionEvent
+import android.view.ViewConfiguration
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.SdkSuppress
+import androidx.test.platform.app.InstrumentationRegistry
+import io.github.chimio.inxlocker.R
 import io.github.chimio.inxlocker.util.PrefsProvider
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -73,6 +81,72 @@ class ForcedComponentPreferencesTest {
         mutable.clear()
         assertEquals(setOf(first), backend.nextUpdate().valueOrThrow())
         assertEquals(setOf(first), PrefsProvider.getStringSet(key))
+    }
+
+    @Test
+    fun actualInstallerRowLongPressTogglesAndPersistsComponent() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val testPackage = instrumentation.context.packageName
+        val className = InstallerFixtureActivity::class.java.name
+        val component = "$testPackage/$className"
+        instrumentation.runOnMainSync {
+            PrefsProvider.init(XposedService(backend).getRemotePreferences("ui-regression"))
+        }
+        val activity = instrumentation.startActivitySync(
+            Intent().setClassName(context.packageName, "${context.packageName}.ui.activity.MainActivity")
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+        try {
+            touchText(context.getString(R.string.installer_system_default))
+            val label = "Regression APK installer"
+            touchText(label, longPress = true)
+            assertEquals(setOf(component), backend.nextUpdate().valueOrThrow())
+            waitForText("$testPackage\n$className")
+
+            touchText(label, longPress = true)
+            assertEquals(emptySet<String>(), backend.nextUpdate().valueOrThrow())
+            waitForText(testPackage)
+            assertEquals(emptySet<String>(), PrefsProvider.forcedInstallerComponents.value)
+            val reloaded = XposedService(backend).getRemotePreferences("ui-regression")
+            assertEquals(emptySet<String>(), reloaded.getStringSet(key, null))
+        } finally {
+            instrumentation.runOnMainSync { activity.finish() }
+        }
+    }
+
+    private fun waitForText(text: String): Rect {
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        val deadline = SystemClock.uptimeMillis() + 10_000
+        while (SystemClock.uptimeMillis() < deadline) {
+            val bounds = automation.rootInActiveWindow
+                ?.findAccessibilityNodeInfosByText(text)
+                ?.firstOrNull { it.isVisibleToUser }
+                ?.let { node -> Rect().also(node::getBoundsInScreen) }
+            if (bounds != null && !bounds.isEmpty) return bounds
+            SystemClock.sleep(100)
+        }
+        throw AssertionError("Installer UI did not show: $text")
+    }
+
+    private fun touchText(text: String, longPress: Boolean = false) {
+        val bounds = waitForText(text)
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        val downTime = SystemClock.uptimeMillis()
+        val holdTime = if (longPress) ViewConfiguration.getLongPressTimeout() + 200L else 50L
+        for (action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
+            if (action == MotionEvent.ACTION_UP) SystemClock.sleep(holdTime)
+            val event = MotionEvent.obtain(
+                downTime, SystemClock.uptimeMillis(), action,
+                bounds.exactCenterX(), bounds.exactCenterY(), 0
+            )
+            event.source = InputDevice.SOURCE_TOUCHSCREEN
+            try {
+                assertTrue("Failed to inject touch event", automation.injectInputEvent(event, true))
+            } finally {
+                event.recycle()
+            }
+        }
     }
 
     private class AppDefinedSet : HashSet<String>()
