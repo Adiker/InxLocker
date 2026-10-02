@@ -155,10 +155,18 @@ jobs:
             app/build/outputs/mapping/release/
           if-no-files-found: warn
 
+      - name: Upload installable regression APK
+        if: success() && matrix.api-level == 36
+        uses: actions/upload-artifact@v4
+        with:
+          name: InxLocker-regression-apk
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
   release:
-    needs: build
+    needs: [build, parcel-regression]
     runs-on: ubuntu-latest
-    if: needs.build.result == 'success' && github.ref == 'refs/heads/main'
+    if: needs.build.result == 'success' && needs.parcel-regression.result == 'success' && github.ref == 'refs/heads/main'
     permissions:
       contents: write
 
