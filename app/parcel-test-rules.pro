@@ -5,3 +5,5 @@
 -keep class kotlin.** { *; }
 -keep,allowobfuscation class io.github.chimio.inxlocker.util.PrefsProvider { *; }
 -keep class io.github.libxposed.service.** { *; }
+# The UI test reads this resource ID from the separate instrumentation APK.
+-keep class io.github.chimio.inxlocker.R$string { public static int installer_system_default; }
