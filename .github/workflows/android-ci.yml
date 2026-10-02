@@ -6,10 +6,14 @@ on:
       - main
     paths:
       - "app/**"
+      - ".github/workflows/android-ci.yml"
+      - ".github/check-app-startup.sh"
   pull_request:
     branches: ["**"]
     paths:
       - "app/**"
+      - ".github/workflows/android-ci.yml"
+      - ".github/check-app-startup.sh"
   workflow_dispatch:
 
 jobs:
@@ -57,7 +61,6 @@ jobs:
           fi
 
       - name: Build release APK
-        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false }}
         env:
           SIGNING_READY: ${{ env.SIGNING_READY }}
           SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
@@ -76,7 +79,6 @@ jobs:
           fi
 
       - name: Upload APK artifact
-        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false }}
         uses: actions/upload-artifact@v4
         with:
           name: InxLocker-apk
@@ -103,10 +105,73 @@ jobs:
           pip install telethon aiohttp
           python3 .github/bot.py "$FILE"
 
-  release:
-    needs: build
+  parcel-regression:
+    name: Parcel regression (Android ${{ matrix.api-level }})
     runs-on: ubuntu-latest
-    if: needs.build.result == 'success' && github.ref == 'refs/heads/main'
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: [26, 36]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Prepare Gradle wrapper
+        run: |
+          sed -i 's/\r$//' ./gradlew
+          chmod +x ./gradlew
+
+      - name: Enable KVM on the GitHub runner
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Test minified release preferences on Android
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          script: |
+            ./gradlew --no-daemon -PparcelRegressionTests=true connectedReleaseAndroidTest
+            bash .github/check-app-startup.sh
+
+      - name: Upload regression reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parcel-regression-api-${{ matrix.api-level }}
+          path: |
+            app/build/reports/androidTests/
+            app/build/reports/startup/
+            app/build/outputs/androidTest-results/
+            app/build/outputs/mapping/release/
+          if-no-files-found: warn
+
+      - name: Upload installable regression APK
+        if: success() && matrix.api-level == 36
+        uses: actions/upload-artifact@v4
+        with:
+          name: InxLocker-regression-apk
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+  release:
+    needs: [build, parcel-regression]
+    runs-on: ubuntu-latest
+    if: needs.build.result == 'success' && needs.parcel-regression.result == 'success' && github.ref == 'refs/heads/main'
     permissions:
       contents: write
 

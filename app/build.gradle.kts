@@ -42,6 +42,14 @@ android {
             )
         }
     }
+    // Exercise the same R8-minified code as the shipped APK in remote CI.
+    if (providers.gradleProperty("parcelRegressionTests").orNull == "true") {
+        testBuildType = "release"
+        buildTypes.getByName("release").apply {
+            signingConfig = signingConfigs.getByName("debug")
+            proguardFile("parcel-test-rules.pro")
+        }
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -77,6 +85,7 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
+    androidTestImplementation("io.github.libxposed:interface:${libs.versions.libxposedService.get()}")
 
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.ui.test.junit4)

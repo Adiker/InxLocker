@@ -141,9 +141,13 @@ object PrefsProvider {
 
     fun putStringSet(key: String, value: Set<String>) {
         try {
-            prefs?.edit { putStringSet(key, value) }
-            cache[key] = value
-            syncField(key, value)
+            // RemotePreferences serializes sets across Binder without copying them.
+            // Kotlin's EmptySet (also obfuscated in release builds) is not available
+            // to the framework's class loader. Always send a platform collection.
+            val storedValue = java.util.HashSet(value)
+            prefs?.edit { putStringSet(key, storedValue) }
+            cache[key] = storedValue
+            syncField(key, storedValue)
         } catch (_: Throwable) {
         }
     }
