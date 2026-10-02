@@ -42,6 +42,11 @@ android {
             )
         }
     }
+    // Exercise the same R8-minified code as the shipped APK in remote CI.
+    if (providers.gradleProperty("parcelRegressionTests").orNull == "true") {
+        testBuildType = "release"
+        buildTypes.getByName("release").signingConfig = signingConfigs.getByName("debug")
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
