@@ -9,6 +9,7 @@ import android.os.SystemClock
 import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.ViewConfiguration
+import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.SdkSuppress
 import androidx.test.platform.app.InstrumentationRegistry
@@ -119,14 +120,45 @@ class ForcedComponentPreferencesTest {
         val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
         val deadline = SystemClock.uptimeMillis() + 10_000
         while (SystemClock.uptimeMillis() < deadline) {
-            val bounds = automation.rootInActiveWindow
-                ?.findAccessibilityNodeInfosByText(text)
-                ?.firstOrNull { it.isVisibleToUser }
-                ?.let { node -> Rect().also(node::getBoundsInScreen) }
+            val root = automation.rootInActiveWindow
+            val bounds = root?.let { findTextBounds(it, text) }
+            @Suppress("DEPRECATION")
+            root?.recycle()
             if (bounds != null && !bounds.isEmpty) return bounds
             SystemClock.sleep(100)
         }
-        throw AssertionError("Installer UI did not show: $text")
+        val root = automation.rootInActiveWindow
+        val tree = root?.let(::describeTree)
+        @Suppress("DEPRECATION")
+        root?.recycle()
+        throw AssertionError("Installer UI did not show: $text\n$tree")
+    }
+
+    // Compose exposes virtual children but does not implement the provider's
+    // findAccessibilityNodeInfosByText. Walk the tree like a UI device driver.
+    private fun findTextBounds(node: AccessibilityNodeInfo, text: String): Rect? {
+        if (node.isVisibleToUser && node.text?.toString()?.contains(text) == true) {
+            val bounds = Rect().also(node::getBoundsInScreen)
+            if (!bounds.isEmpty) return bounds
+        }
+        for (index in 0 until node.childCount) {
+            val child = node.getChild(index) ?: continue
+            val bounds = findTextBounds(child, text)
+            @Suppress("DEPRECATION")
+            child.recycle()
+            if (bounds != null) return bounds
+        }
+        return null
+    }
+
+    private fun describeTree(node: AccessibilityNodeInfo): String = buildString {
+        appendLine("${node.className}: text=${node.text}, visible=${node.isVisibleToUser}")
+        for (index in 0 until node.childCount) {
+            val child = node.getChild(index) ?: continue
+            append(describeTree(child))
+            @Suppress("DEPRECATION")
+            child.recycle()
+        }
     }
 
     private fun touchText(text: String, longPress: Boolean = false) {
