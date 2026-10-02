@@ -142,7 +142,9 @@ jobs:
           target: google_apis
           arch: x86_64
           disable-animations: true
-          script: ./gradlew --no-daemon -PparcelRegressionTests=true connectedReleaseAndroidTest
+          script: |
+            ./gradlew --no-daemon -PparcelRegressionTests=true connectedReleaseAndroidTest
+            bash .github/check-app-startup.sh
 
       - name: Upload regression reports
         if: always()
@@ -151,6 +153,7 @@ jobs:
           name: parcel-regression-api-${{ matrix.api-level }}
           path: |
             app/build/reports/androidTests/
+            app/build/reports/startup/
             app/build/outputs/androidTest-results/
             app/build/outputs/mapping/release/
           if-no-files-found: warn
