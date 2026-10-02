@@ -31,7 +31,7 @@ class ForcedComponentPreferencesTest {
     fun unnormalizedKotlinEmptySetReproducesClassLoaderFailure() {
         val prefs = XposedService(backend).getRemotePreferences("regression")
         prefs.edit().putStringSet(key, emptySet()).commit()
-        assertTrue(backend.nextUpdate().exceptionOrNull() is BadParcelableException)
+        assertTrue(backend.nextUpdate().error is BadParcelableException)
     }
 
     @Test
@@ -45,7 +45,7 @@ class ForcedComponentPreferencesTest {
                 if (!add(component)) remove(component)
             }.toSet()
             PrefsProvider.putStringSet(key, selected)
-            assertEquals(selected, backend.nextUpdate().getOrThrow())
+            assertEquals(selected, backend.nextUpdate().valueOrThrow())
             assertEquals(selected, PrefsProvider.forcedInstallerComponents.value)
             assertEquals(selected, prefs.getStringSet(key, null))
             val reloaded = XposedService(backend).getRemotePreferences("regression")
@@ -57,20 +57,29 @@ class ForcedComponentPreferencesTest {
     fun appDefinedAndMutableSetsAreCopiedBeforeApply() {
         val prefs = XposedService(backend).getRemotePreferences("regression")
         PrefsProvider.init(prefs)
-        // SetBuilder, like EmptySet, belongs to the APK rather than the framework.
-        val appDefinedSet = buildSet {
+        // A Serializable set from the APK is also unavailable to the framework.
+        val appDefinedSet = AppDefinedSet().apply {
             add(first)
             add(second)
         }
         PrefsProvider.putStringSet(key, appDefinedSet)
-        assertEquals(appDefinedSet, backend.nextUpdate().getOrThrow())
+        assertEquals(appDefinedSet, backend.nextUpdate().valueOrThrow())
 
         val mutable = mutableSetOf(first)
         PrefsProvider.putStringSet(key, mutable)
         assertNotSame(mutable, prefs.getStringSet(key, null))
         mutable.clear()
-        assertEquals(setOf(first), backend.nextUpdate().getOrThrow())
+        assertEquals(setOf(first), backend.nextUpdate().valueOrThrow())
         assertEquals(setOf(first), PrefsProvider.getStringSet(key))
+    }
+
+    private class AppDefinedSet : HashSet<String>()
+
+    private data class Update(val value: Set<String>? = null, val error: Throwable? = null) {
+        fun valueOrThrow(): Set<String> {
+            error?.let { throw it }
+            return checkNotNull(value)
+        }
     }
 
     /**
@@ -80,7 +89,7 @@ class ForcedComponentPreferencesTest {
      */
     private inner class FrameworkPreferences : IXposedService.Default() {
         private val values = HashMap<String, Any>()
-        private val updates = LinkedBlockingQueue<Result<Set<String>>>()
+        private val updates = LinkedBlockingQueue<Update>()
 
         override fun requestRemotePreferences(group: String): Bundle = Bundle().apply {
             putSerializable("map", HashMap(values))
@@ -88,23 +97,24 @@ class ForcedComponentPreferencesTest {
 
         @Suppress("DEPRECATION", "UNCHECKED_CAST")
         override fun updateRemotePreferences(group: String, diff: Bundle) {
-            updates.add(runCatching {
-                val parcel = Parcel.obtain()
-                try {
-                    diff.writeToParcel(parcel, 0)
-                    parcel.setDataPosition(0)
-                    val received = Bundle.CREATOR.createFromParcel(parcel)
-                    received.classLoader = String::class.java.classLoader
-                    val put = received.getSerializable("put") as Map<String, Any>
-                    values.putAll(put)
-                    HashSet(put[key] as Set<String>)
-                } finally {
-                    parcel.recycle()
-                }
-            })
+            val parcel = Parcel.obtain()
+            val update = try {
+                diff.writeToParcel(parcel, 0)
+                parcel.setDataPosition(0)
+                val received = Bundle.CREATOR.createFromParcel(parcel)
+                received.classLoader = String::class.java.classLoader
+                val put = received.getSerializable("put") as Map<String, Any>
+                values.putAll(put)
+                Update(value = HashSet(put[key] as Set<String>))
+            } catch (error: Throwable) {
+                Update(error = error)
+            } finally {
+                parcel.recycle()
+            }
+            updates.add(update)
         }
 
-        fun nextUpdate(): Result<Set<String>> =
+        fun nextUpdate(): Update =
             checkNotNull(updates.poll(10, TimeUnit.SECONDS)) {
                 "RemotePreferences did not send its update"
             }

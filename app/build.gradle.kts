@@ -45,7 +45,10 @@ android {
     // Exercise the same R8-minified code as the shipped APK in remote CI.
     if (providers.gradleProperty("parcelRegressionTests").orNull == "true") {
         testBuildType = "release"
-        buildTypes.getByName("release").signingConfig = signingConfigs.getByName("debug")
+        buildTypes.getByName("release").apply {
+            signingConfig = signingConfigs.getByName("debug")
+            proguardFile("parcel-test-rules.pro")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
